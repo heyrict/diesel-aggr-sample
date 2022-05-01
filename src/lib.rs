@@ -52,9 +52,20 @@ mod bench {
         conn
     }
 
+    fn cleanup_database(mut conn: PgConnection) {
+        use crate::schema::*;
+        diesel::delete(posts::table)
+            .execute(&mut conn)
+            .expect("Failed to delete posts table");
+        diesel::delete(users::table)
+            .execute(&mut conn)
+            .expect("Failed to delete users table");
+    }
+
     #[bench]
     fn bench_aggregation(b: &mut Bencher) {
         let mut conn = setup_database();
+
         let one_user: User = {
             use crate::schema::users::dsl::*;
             users.first(&mut conn).expect("Unable to fetch one user")
@@ -66,6 +77,8 @@ mod bench {
                 .count()
                 .get_result::<i64>(&mut conn)
                 .expect("Unable to get post count");
-        })
+        });
+
+        cleanup_database(conn);
     }
 }
