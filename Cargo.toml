@@ -7,4 +7,4 @@ edition = "2021"
 
 [dependencies]
 dotenv = "*"
-diesel = { version = "^1.4", features = ["postgres"] }
+diesel = { version = "^1.4", features = ["postgres", "r2d2"] }

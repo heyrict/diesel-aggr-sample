@@ -9,15 +9,20 @@ pub mod schema;
 
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
+use diesel::r2d2::{ConnectionManager, Pool};
 use dotenv::dotenv;
 use std::env;
 
-pub fn establish_connection() -> PgConnection {
+pub type DbPool = Pool<ConnectionManager<PgConnection>>;
+
+pub fn establish_connection() -> DbPool {
     dotenv().ok();
 
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    PgConnection::establish(&database_url)
-        .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
+    let manager = ConnectionManager::<PgConnection>::new(&database_url);
+    Pool::builder()
+        .build(manager)
+        .expect("Failed to create pool")
 }
 
 #[cfg(test)]
@@ -26,11 +31,11 @@ mod bench {
     use crate::models::*;
     use test::Bencher;
 
-    fn setup_database() -> PgConnection {
-        static NUM_USERS: i32 = 10;
+    fn setup_database(pool: DbPool) {
+        static NUM_USERS: i32 = 5;
         static NUM_POSTS_PER_USER: i32 = 30;
 
-        let mut conn = establish_connection();
+        let mut conn = pool.get().expect("Failed to get connection from pool");
 
         for _ in 0..NUM_USERS {
             use crate::schema::users::dsl::*;
@@ -48,12 +53,12 @@ mod bench {
                     .expect("Failed to insert into `posts`");
             }
         }
-
-        conn
     }
 
-    fn cleanup_database(mut conn: PgConnection) {
+    fn cleanup_database(pool: DbPool) {
         use crate::schema::*;
+
+        let mut conn = pool.get().expect("Failed to get connection from pool");
         diesel::delete(posts::table)
             .execute(&mut conn)
             .expect("Failed to delete posts table");
@@ -64,14 +69,18 @@ mod bench {
 
     #[bench]
     fn bench_aggregation(b: &mut Bencher) {
-        let mut conn = setup_database();
+        let pool = establish_connection();
+        setup_database(pool.clone());
 
+        let mut conn = pool.get().expect("Failed to get connection from pool");
         let one_user: User = {
             use crate::schema::users::dsl::*;
             users.first(&mut conn).expect("Unable to fetch one user")
         };
         b.iter(|| {
             use crate::schema::posts::dsl::*;
+            let pool = pool.clone();
+            let mut conn = pool.get().expect("Failed to get connection from pool");
             posts
                 .filter(user_id.eq(one_user.id))
                 .count()
@@ -79,6 +88,6 @@ mod bench {
                 .expect("Unable to get post count");
         });
 
-        cleanup_database(conn);
+        cleanup_database(pool);
     }
 }
